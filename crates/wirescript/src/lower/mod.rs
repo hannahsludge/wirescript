@@ -119,6 +119,7 @@ pub fn lower(input: LowerInput<'_>) -> LowerResult {
         known_fn_names: Arc::new(collect_fn_names(input.ast)),
         is_root_module: true,
         doc_comments: input.doc_comments,
+        callbacks: &mut HashMap::default(),
     };
 
     // Pass 1: register I/O + vars + buffers.
@@ -886,6 +887,7 @@ pub fn compile_chip_template(
         known_fn_names: Arc::new(HashSet::default()),
         is_root_module: false,
         doc_comments: &empty_docs,
+        callbacks: &mut HashMap::default()
     };
 
     // Create input ports

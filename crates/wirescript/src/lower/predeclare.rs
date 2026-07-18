@@ -17,6 +17,7 @@ pub(super) fn pre_declare_decl(ctx: &mut LowerCtx, d: &TopDecl) {
             o.label.as_deref(),
             &o.range,
         ),
+        TopDecl::Callback(c) => pre_declare_callback(ctx, c),
         TopDecl::Let(l) => pre_declare_exec_signal(ctx, l),
         TopDecl::AnonChip(ac) => {
             let chip_node_id = ctx.add_gate(AddNodeOpts {
@@ -408,6 +409,12 @@ pub(super) fn pre_declare_var(ctx: &mut LowerCtx, d: &VarDecl) {
         }),
     );
 }
+
+
+pub(super) fn pre_declare_callback(ctx: &mut LowerCtx, c: &Callback) {
+    ctx.callbacks.entry(c.name.clone()).or_default().push(c.to_owned());
+}
+
 
 pub(super) fn pre_declare_buffer(ctx: &mut LowerCtx, d: &BufferDecl) {
     let annotated = d.typ.as_ref().map(type_of_type_expr);

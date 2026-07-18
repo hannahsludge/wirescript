@@ -62,6 +62,7 @@ pub fn hover_at(
 
     let word = word_at(source, line, col)?;
 
+    // TODO: Add hover_callback_keyword
     None
         .or_else(|| hover_if_keyword(source, file, &word, if_contexts, resource_estimates, line, col))
         .or_else(|| hover_named_param(source, &word, line, col))

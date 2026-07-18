@@ -151,6 +151,7 @@ pub(super) struct LowerCtx<'a> {
     /// `///` doc comments keyed by the declaration's source start offset.
     /// Consumed when stamping `DOC_TEXT` onto chip nodes.
     pub(super) doc_comments: &'a HashMap<usize, String>,
+    pub(super) callbacks: &'a mut HashMap<String, Vec<Callback>>,
 }
 
 impl<'a> LowerCtx<'a> {

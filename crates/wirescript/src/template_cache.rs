@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
 use crate::ast::{
-    Block, CallArg, ChipDecl, Expr, If, InterpPart, RecordLitField, Script, Stmt, TopDecl,
+    Block, CallArg, Callback, ChipDecl, Expr, If, InterpPart, RecordLitField, Script, Stmt, TopDecl
 };
 use crate::template::{CompiledTemplate, InlineModEntry};
 
@@ -359,6 +359,7 @@ fn collect_calls_in_stmt(stmt: &Stmt, known: &HashSet<String>, out: &mut HashSet
         Stmt::Handler(h) => collect_calls_in_block(&h.body, known, out),
         Stmt::AnonChip(ac) => collect_calls_in_block(&ac.body, known, out),
         Stmt::ChipDecl(c) => collect_calls_in_chip(c, known, out),
+        Stmt::Callback(c) => collect_calls_in_callback(c, known, out),
         Stmt::Return { value, .. } => {
             if let Some(e) = value {
                 collect_calls_in_expr(e, known, out);
@@ -378,6 +379,10 @@ fn collect_calls_in_if(i: &If, known: &HashSet<String>, out: &mut HashSet<String
 }
 
 fn collect_calls_in_chip(c: &ChipDecl, known: &HashSet<String>, out: &mut HashSet<String>) {
+    collect_calls_in_block(&c.body, known, out);
+}
+
+fn collect_calls_in_callback(c: &Callback, known: &HashSet<String>, out: &mut HashSet<String>) {
     collect_calls_in_block(&c.body, known, out);
 }
 

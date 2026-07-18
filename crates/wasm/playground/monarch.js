@@ -7,7 +7,7 @@ export const monarchLanguage = {
   keywords: [
     'if', 'else', 'then', 'match', 'on', 'return', 'emit', 'await',
     'var', 'array', 'buffer', 'let', 'fn', 'chip', 'mod', 'in', 'out', 'open', 'ref',
-    'import', 'from', 'as', 'event', 'static', 'type',
+    'import', 'from', 'as', 'event', 'static', 'type', 'callback,'
   ],
 
   typeKeywords: [

@@ -19,6 +19,10 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, e: &Expr) -> PortRef {
         if let Some(spec) = find_call(name) {
             return lower_builtin_call(ctx, spec, None, args, range, e);
         }
+        if ctx.callbacks.contains_key(name) {
+            let cb = ctx.callbacks.get(name).unwrap().clone();
+            return lower_callback_call(ctx, &cb, args, range);
+        }
         // An identifier callee that is neither an in-scope chip/mod nor a
         // builtin. If the name IS declared as a chip/mod somewhere in the
         // program, it's a use-before-declaration (chips/mods register in source
@@ -104,6 +108,195 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, e: &Expr) -> PortRef {
         }
     }
     synthesise_unsupported(ctx, e)
+}
+
+pub(super) fn lower_callback_call(
+    ctx: &mut LowerCtx,
+    callbacks: &Vec<Callback>,
+    args: &[CallArg],
+    range: &SourceRange,
+) -> PortRef {
+    if (callbacks.first().is_none()) {
+        return ctx.current_exec.unwrap();
+    }
+    // This call's output nodes don't exist yet, so any wire touching them
+    // lands at an index >= this. The output-source lookups and the
+    // output-node removal below only scan this tail instead of the whole
+    // module wire list (which made deep inline-call chains quadratic).
+    let positional_args: Vec<&Expr> = args
+        .iter()
+        .filter_map(|a| match a {
+            CallArg::Positional(e) => Some(e),
+            CallArg::Named { .. } | CallArg::Spread(_) => None,
+        })
+        .collect();
+    let first_callback = callbacks.first().unwrap();
+    // Collect param bindings first (before mutating ctx) so ref lookups
+    // see the caller's vars.
+    let mut ref_bindings: Vec<(String, VarRecord)> = Vec::new();
+    let mut input_bindings: Vec<(String, NodeRecord)> = Vec::new();
+    let mut val_bindings: Vec<(String, PortRef, Type)> = Vec::new();
+    let mut record_bindings: Vec<(String, HashMap<crate::intern::Sym, Binding>)> = Vec::new();
+    for (i, param) in first_callback.inputs.iter().enumerate() {
+        let Some(arg_expr) = positional_args.get(i) else {
+            continue;
+        };
+        // A record literal arg lowers to a Binding::Record (as `let x = {..}`
+        // does), so record and destructured params receive their fields instead
+        // of a single unsupported value port.
+        if let Expr::RecordLit { fields, .. } = arg_expr {
+            let record = lower_record_lit(ctx, fields);
+            record_bindings.push((param.name.clone(), record));
+            continue;
+        }
+        if let Some(Binding::Record(fields)) = resolve_field_chain(ctx, arg_expr).cloned() {
+            record_bindings.push((param.name.clone(), fields));
+            continue;
+        }
+        match &param.typ {
+            TypeExpr::Ref { .. } | TypeExpr::Array { .. } => {
+                let var_rec = if let Expr::Ident { name, .. } = arg_expr {
+                    ctx.lookup_var(name).cloned()
+                } else if let Some(Binding::Var(v)) = resolve_field_chain(ctx, arg_expr).cloned() {
+                    Some(v)
+                } else {
+                    None
+                };
+                if let Some(var_rec) = var_rec {
+                    ref_bindings.push((
+                        param.name.clone(),
+                        VarRecord {
+                            node_id: var_rec.node_id,
+                            inner_type: var_rec.inner_type,
+                            get_node_for_handler: None,
+                            storage: var_rec.storage,
+                        },
+                    ));
+                } else if let Expr::Ident { name, .. } = arg_expr
+                    && let Some(Binding::Input(inp)) = ctx.scope.get(name)
+                {
+                    // An `in X: T[]` / ref input passed by reference: forward the
+                    // input binding so the mod body resolves the param to the
+                    // input's RER_Output ref, exactly like a var array/ref.
+                    input_bindings.push((param.name.clone(), inp.clone()));
+                }
+            }
+            _ => {
+                let val_port = lower_expr(ctx, arg_expr);
+                let t = type_of_type_expr(&param.typ);
+                val_bindings.push((param.name.clone(), val_port, t));
+            }
+        }
+    }
+
+    // nested if/else blocks) so they're registered in ctx.vars.
+    fn pre_declare_block_vars(ctx: &mut LowerCtx, block: &Block) {
+        for s in &block.stmts {
+            match s {
+                Stmt::Var(v) => pre_declare_var(ctx, v),
+                Stmt::Array(a) => pre_declare_array(ctx, a),
+                Stmt::Buffer(b) => pre_declare_buffer(ctx, b),
+                Stmt::If(i) => {
+                    pre_declare_block_vars(ctx, &i.then_block);
+                    if let Some(eb) = &i.else_block {
+                        pre_declare_block_vars(ctx, eb);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for cb in callbacks {
+        // Pre-declare var/array/buffer inside the mod body (recursively into
+
+    ctx.scope.push(crate::scope::ScopeTag::MODULE);
+    for (name, rec) in &ref_bindings {
+        ctx.scope.insert(&name, Binding::Var(rec.clone()));
+    }
+    for (name, rec) in &input_bindings {
+        ctx.scope.insert(&name, Binding::Input(rec.clone()));
+    }
+    for (name, port, _ty) in &val_bindings {
+        ctx.scope
+            .insert(&name, Binding::Local(LocalRecord { port: port.clone()}));
+    }
+    for (name, fields) in &record_bindings {
+        ctx.scope.insert(&name, Binding::Record(fields.clone()));
+    }
+
+    // Apply destructuring patterns: for each param with a pattern, look up
+    // the synthetic binding just inserted and expand it into the named fields.
+    for param in &first_callback.inputs {
+        let Some(pattern) = &param.pattern else {
+            continue;
+        };
+        let base_binding = ctx.scope.get(&param.name).cloned();
+        match pattern {
+            crate::ast::ParamPattern::Record { fields, .. } => {
+                let record_map = match &base_binding {
+                    Some(Binding::Record(m)) => Some(m.clone()),
+                    _ => None,
+                };
+                if let Some(src) = record_map {
+                    install_record_destruct(ctx, &src, fields);
+                }
+            }
+            crate::ast::ParamPattern::Tuple { names, .. } => {
+                // For tuple patterns, extract by index from the local binding.
+                if let Some(Binding::Local(local)) = &base_binding {
+                    let source_node = ctx.builder.module.nodes.get(&local.port.node_id).cloned();
+                    if let Some(node) = source_node {
+                        let outputs: Vec<_> = node.ports.outputs.iter().collect();
+                        for (i, name) in names.iter().enumerate() {
+                            if let Some(port) = outputs.get(i) {
+                                ctx.scope.insert(
+                                    &name,
+                                    Binding::Local(LocalRecord {
+                                        port: port_ref(node.id, crate::intern::resolve(port.name)),
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+        pre_declare_block_vars(ctx, &first_callback.body);
+
+        let saved_return_exec = ctx.mod_return_exec.take();
+        let saved_return_var = ctx.mod_return_var.take();
+
+        lower_block(ctx, &cb.body);
+    
+        ctx.mod_return_exec = saved_return_exec;
+        ctx.mod_return_var = saved_return_var;
+
+        ctx.scope.pop();
+
+        // The mod body may have written to vars passed through records.
+        // Those writes invalidated caches inside the mod scope (now popped),
+        // but the caller's copies of those Var bindings still have stale
+        // caches. Clear all caches to ensure subsequent reads produce fresh
+        // Var_Gets.
+        reset_var_get_caches(ctx);
+
+        ctx.pending_inline_record = None;
+
+        for (i, param) in cb.inputs.iter().enumerate() {
+            if matches!(&param.typ, TypeExpr::Ref { .. } | TypeExpr::Array { .. })
+                && let Some(arg_expr) = positional_args.get(i)
+                && let Expr::Ident { name, .. } = arg_expr
+                && let Some(v) = ctx.lookup_var_mut(name.as_str())
+            {
+                v.get_node_for_handler = None;
+            }
+        }
+
+    }
+    return ctx.current_exec.unwrap();
 }
 
 pub(super) fn lower_chip_call(
@@ -228,7 +421,8 @@ pub(super) fn lower_chip_call_inline(
         ctx.scope.insert(&name, Binding::Input(rec));
     }
     for (name, port, _ty) in val_bindings {
-        ctx.scope.insert(&name, Binding::Local(LocalRecord { port }));
+        ctx.scope
+            .insert(&name, Binding::Local(LocalRecord { port }));
     }
     for (name, fields) in record_bindings {
         ctx.scope.insert(&name, Binding::Record(fields));
@@ -684,6 +878,7 @@ fn build_chip_module(
         known_fn_names: ctx.known_fn_names.clone(),
         is_root_module: false,
         doc_comments: ctx.doc_comments,
+        callbacks: &mut HashMap::default(),
     };
 
     // A chip is visual grouping only — wire refs cross the boundary freely — so
@@ -724,9 +919,12 @@ fn build_chip_module(
                 ..Default::default()
             };
             let new_id = child_ctx.add_gate(opts);
-            child_ctx
-                .scope
-                .insert_sym(name, Binding::Local(LocalRecord { port: new_id.port(local.port.port) }));
+            child_ctx.scope.insert_sym(
+                name,
+                Binding::Local(LocalRecord {
+                    port: new_id.port(local.port.port),
+                }),
+            );
             continue;
         }
         child_ctx.scope.insert_sym(name, binding);
@@ -860,10 +1058,9 @@ fn build_chip_module(
                 t.clone(),
                 chip_decl.range.clone(),
             );
-            child_ctx.scope.insert(
-                &inp.name,
-                Binding::Input(NodeRecord { node_id, ty: t }),
-            );
+            child_ctx
+                .scope
+                .insert(&inp.name, Binding::Input(NodeRecord { node_id, ty: t }));
         }
     }
     for out in &chip_decl.outputs {

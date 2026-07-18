@@ -164,7 +164,7 @@ export function createEditor(container, wasm, monaco, getFilesJson, getPrefabsJs
         };
         const suggestions = items.map(item => {
           const isFunc = item.kind === 'function' || item.kind === 'method';
-          const isMod = item.kind === 'mod' || item.kind === 'chip';
+          const isMod = item.kind === 'mod' || item.kind === 'chip' || item.kind == 'callback';
           const needsParens = (isFunc || isMod) && !item.insertText;
           let insertText = item.insertText || item.label;
           let insertTextRules;

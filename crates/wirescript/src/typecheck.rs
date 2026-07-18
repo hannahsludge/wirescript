@@ -43,9 +43,10 @@ pub enum SymbolKind {
     Out,
     Namespace,
     Type,
+    Callback,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EventDataField {
     pub name: String,
     pub ty: Type,
@@ -528,6 +529,33 @@ fn register_decl(ctx: &mut TypeCheckCtx, d: &TopDecl) {
                 },
             );
         }
+        TopDecl::Callback(c) => {
+            let params: Vec<EventDataField> = c
+                .inputs
+                .iter()
+                .map(|p| EventDataField {
+                    name: p.name.clone(),
+                    ty: resolve_type_expr(ctx, &p.typ),
+                })
+                .collect();
+            let outputs: Vec<EventDataField> = c
+                .outputs
+                .iter()
+                .map(|o| EventDataField {
+                    name: o.name.clone(),
+                    ty: resolve_type_expr(ctx, &o.typ),
+                })
+                .collect();
+            let info = SymbolInfo {
+                kind: SymbolKind::Callback,
+                name: c.name.clone(),
+                ty: Type::Any,
+                decl_range: c.range.clone(),
+                signature: Some(FnOrChipSig { params, outputs }),
+                event_data: None,
+            };
+            declare_if_same_sig(ctx, &c.name, info);
+        }
         TopDecl::Event(e) => {
             declare_or_dup(
                 ctx,
@@ -627,6 +655,29 @@ fn declare_or_dup(ctx: &mut TypeCheckCtx, name: &str, info: SymbolInfo) {
         ctx.emit("WS013", format!("duplicate declaration of '{name}'"), range);
     }
 }
+
+fn declare_if_same_sig(ctx: &mut TypeCheckCtx, name: &str, info: SymbolInfo) {
+    let range = info.decl_range.clone();
+    let existing_opt = ctx.scope.declare(name, info.clone());
+    if existing_opt.is_some() {
+        let existing_sig = existing_opt.unwrap().signature.unwrap();
+        let new_sig = info.signature.clone().unwrap();
+        // TODO: Add errors.
+        if existing_sig.params.len() != new_sig.params.len() { 
+            ctx.emit("WS025", format!("mismatched signature for callback '{name}'"), range.clone());
+        }
+        if existing_sig.outputs.len() != new_sig.outputs.len() { 
+            ctx.emit("WS025", format!("mismatched signature for callback '{name}'"), range.clone());
+        }
+        if existing_sig.params != new_sig.params { 
+            ctx.emit("WS025", format!("mismatched signature for callback '{name}'"), range.clone());
+        }
+        if existing_sig.outputs != new_sig.outputs { 
+            ctx.emit("WS025", format!("mismatched signature for callback '{name}'"), range.clone());
+        }
+    }
+}
+
 
 // ---------- decl checking (2nd pass) ----------
 
@@ -943,6 +994,114 @@ fn check_decl(
             }
             ctx.scope.pop();
         }
+        TopDecl::Callback(c) => {
+            ctx.scope.push();
+            for p in &c.inputs {
+                let pt = resolve_type_expr(ctx, &p.typ);
+                let kind = if matches!(&p.typ, TypeExpr::Ref { .. } | TypeExpr::Array { .. }) {
+                    SymbolKind::Var
+                } else {
+                    SymbolKind::Param
+                };
+                // If the param has a destructuring pattern, register the
+                // synthetic name with the full type, then also register each
+                // destructured field with its resolved field type.
+                if let Some(pattern) = &p.pattern {
+                    ctx.scope.declare(
+                        &p.name,
+                        SymbolInfo {
+                            kind: SymbolKind::Param,
+                            name: p.name.clone(),
+                            ty: pt.clone(),
+                            decl_range: p.range.clone(),
+                            signature: None,
+                            event_data: None,
+                        },
+                    );
+                    match pattern {
+                        crate::ast::ParamPattern::Record { fields, .. } => {
+                            for field in fields {
+                                match field {
+                                    crate::ast::RecordDestructField::Named {
+                                        name, alias, ..
+                                    } => {
+                                        let bind_name = alias.as_ref().unwrap_or(name);
+                                        let field_ty = if let Type::Record(rec_fields) = &pt {
+                                            rec_fields
+                                                .iter()
+                                                .find(|(k, _)| k == name)
+                                                .map(|(_, t)| t.clone())
+                                                .unwrap_or(Type::Any)
+                                        } else {
+                                            Type::Any
+                                        };
+                                        ctx.scope.declare(
+                                            bind_name,
+                                            SymbolInfo {
+                                                kind: SymbolKind::Param,
+                                                name: bind_name.clone(),
+                                                ty: field_ty,
+                                                decl_range: p.range.clone(),
+                                                signature: None,
+                                                event_data: None,
+                                            },
+                                        );
+                                    }
+                                    crate::ast::RecordDestructField::Rest { name, .. } => {
+                                        ctx.scope.declare(
+                                            name,
+                                            SymbolInfo {
+                                                kind: SymbolKind::Param,
+                                                name: name.clone(),
+                                                ty: Type::Any,
+                                                decl_range: p.range.clone(),
+                                                signature: None,
+                                                event_data: None,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        crate::ast::ParamPattern::Tuple { names, .. } => {
+                            let field_types = if let Type::Tuple(fs) = &pt {
+                                fs.clone()
+                            } else {
+                                vec![]
+                            };
+                            for (i, name) in names.iter().enumerate() {
+                                let field_ty = field_types.get(i).cloned().unwrap_or(Type::Any);
+                                ctx.scope.declare(
+                                    name,
+                                    SymbolInfo {
+                                        kind: SymbolKind::Param,
+                                        name: name.clone(),
+                                        ty: field_ty,
+                                        decl_range: p.range.clone(),
+                                        signature: None,
+                                        event_data: None,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    ctx.scope.declare(
+                        &p.name,
+                        SymbolInfo {
+                            kind,
+                            name: p.name.clone(),
+                            ty: pt,
+                            decl_range: p.range.clone(),
+                            signature: None,
+                            event_data: None,
+                        },
+                    );
+                }
+            }
+            ctx.in_exec(|ctx| check_block(ctx, &c.body, tmap, omap));
+            ctx.scope.pop();
+        }
         TopDecl::AnonChip(ac) => {
             // Anon chip shares parent scope — NO scope push/pop.
             // Vars already pre-registered in pass 1; use check_decl (not
@@ -963,6 +1122,112 @@ fn check_decl(
             bind_handler_trigger_params(ctx, h);
             ctx.in_exec(|ctx| check_block(ctx, &h.body, tmap, omap));
             ctx.scope.pop();
+        }
+        TopDecl::Callback(c) => {
+            ctx.scope.push();
+            for p in &c.inputs {
+                let pt = resolve_type_expr(ctx, &p.typ);
+                let kind = if matches!(&p.typ, TypeExpr::Ref { .. } | TypeExpr::Array { .. }) {
+                    SymbolKind::Var
+                } else {
+                    SymbolKind::Param
+                };
+                // If the param has a destructuring pattern, register the
+                // synthetic name with the full type, then also register each
+                // destructured field with its resolved field type.
+                if let Some(pattern) = &p.pattern {
+                    ctx.scope.declare(
+                        &p.name,
+                        SymbolInfo {
+                            kind: SymbolKind::Param,
+                            name: p.name.clone(),
+                            ty: pt.clone(),
+                            decl_range: p.range.clone(),
+                            signature: None,
+                            event_data: None,
+                        },
+                    );
+                    match pattern {
+                        crate::ast::ParamPattern::Record { fields, .. } => {
+                            for field in fields {
+                                match field {
+                                    crate::ast::RecordDestructField::Named {
+                                        name, alias, ..
+                                    } => {
+                                        let bind_name = alias.as_ref().unwrap_or(name);
+                                        let field_ty = if let Type::Record(rec_fields) = &pt {
+                                            rec_fields
+                                                .iter()
+                                                .find(|(k, _)| k == name)
+                                                .map(|(_, t)| t.clone())
+                                                .unwrap_or(Type::Any)
+                                        } else {
+                                            Type::Any
+                                        };
+                                        ctx.scope.declare(
+                                            bind_name,
+                                            SymbolInfo {
+                                                kind: SymbolKind::Param,
+                                                name: bind_name.clone(),
+                                                ty: field_ty,
+                                                decl_range: p.range.clone(),
+                                                signature: None,
+                                                event_data: None,
+                                            },
+                                        );
+                                    }
+                                    crate::ast::RecordDestructField::Rest { name, .. } => {
+                                        ctx.scope.declare(
+                                            name,
+                                            SymbolInfo {
+                                                kind: SymbolKind::Param,
+                                                name: name.clone(),
+                                                ty: Type::Any,
+                                                decl_range: p.range.clone(),
+                                                signature: None,
+                                                event_data: None,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        crate::ast::ParamPattern::Tuple { names, .. } => {
+                            let field_types = if let Type::Tuple(fs) = &pt {
+                                fs.clone()
+                            } else {
+                                vec![]
+                            };
+                            for (i, name) in names.iter().enumerate() {
+                                let field_ty = field_types.get(i).cloned().unwrap_or(Type::Any);
+                                ctx.scope.declare(
+                                    name,
+                                    SymbolInfo {
+                                        kind: SymbolKind::Param,
+                                        name: name.clone(),
+                                        ty: field_ty,
+                                        decl_range: p.range.clone(),
+                                        signature: None,
+                                        event_data: None,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    ctx.scope.declare(
+                        &p.name,
+                        SymbolInfo {
+                            kind,
+                            name: p.name.clone(),
+                            ty: pt,
+                            decl_range: p.range.clone(),
+                            signature: None,
+                            event_data: None,
+                        },
+                    );
+                }
+            }
         }
         TopDecl::ExprStmt(s) => {
             ctx.in_pure(|ctx| {
@@ -1400,6 +1665,10 @@ fn check_stmt(
         Stmt::ChipDecl(c) => {
             register_decl(ctx, &TopDecl::Chip(c.clone()));
             check_decl(ctx, &TopDecl::Chip(c.clone()), tmap, omap);
+        }
+        Stmt::Callback(c) => {
+            register_decl(ctx, &TopDecl::Callback(c.clone()));
+            check_decl(ctx, &TopDecl::Callback(c.clone()), tmap, omap);
         }
         Stmt::Return { value, range } => {
             if ctx.exec_mode() != ExecMode::Exec && value.is_none() {

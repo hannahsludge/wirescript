@@ -89,7 +89,7 @@ async function activate(context) {
           const k = { function: 1, keyword: 13, type: 6, class: 6, field: 4, event: 22, method: 1, var: 5, buffer: 5, let: 20, mod: 1, chip: 1, param: 5 }[i.kind] || 0;
           const ci = new vscode.CompletionItem(i.label, k);
           ci.detail = i.detail || undefined;
-          if ((i.kind === "function" || i.kind === "method" || i.kind === "mod" || i.kind === "chip") && !i.insertText)
+          if ((i.kind === "function" || i.kind === "method" || i.kind === "mod" || i.kind === "chip"| i.kind == "callback") && !i.insertText)
             ci.insertText = new vscode.SnippetString(i.label + "($1)");
           else if (i.insertText?.includes("$")) ci.insertText = new vscode.SnippetString(i.insertText);
           else if (i.insertText) ci.insertText = i.insertText;
@@ -103,13 +103,13 @@ async function activate(context) {
             const word = doc.getText(doc.getWordRangeAtPosition(pos));
             const matches = wsSyms.filter(s => s.name.toLowerCase().startsWith(word.toLowerCase()));
             for (const s of matches) {
-              const ci = new vscode.CompletionItem(s.name, s.kind === "mod" || s.kind === "chip" ? 1 : 5);
+              const ci = new vscode.CompletionItem(s.name, s.kind === "mod" || s.kind === "chip" || s.kind == "callback" ? 1 : 5);
               ci.detail = `(auto-import from ${s.file.replace(/\.ws$/, "")})`;
               const importPath = s.file.replace(/\.ws$/, "");
               ci.additionalTextEdits = [
                 vscode.TextEdit.insert(new vscode.Position(0, 0), `import { ${s.name} } from "${importPath}"\n`)
               ];
-              if (s.kind === "mod" || s.kind === "chip" || s.kind === "fn")
+              if (s.kind === "mod" || s.kind === "chip" || s.kind === "fn" || s.kind == "callback")
                 ci.insertText = new vscode.SnippetString(s.name + "($1)");
               results.push(ci);
             }

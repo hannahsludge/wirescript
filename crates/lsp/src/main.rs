@@ -1030,7 +1030,7 @@ fn resolve_record_fields(ty: &str, symbols: &[SymbolDef]) -> Option<Vec<String>>
 /// The completion-item kind for a namespace member of the given symbol kind.
 fn namespace_member_kind(kind: &str) -> CompletionItemKind {
     match kind {
-        "mod" | "chip" | "fn" => CompletionItemKind::FUNCTION,
+        "mod" | "chip" | "fn" | "callback" => CompletionItemKind::FUNCTION,
         "let" => CompletionItemKind::CONSTANT,
         "type" => CompletionItemKind::CLASS,
         "event" => CompletionItemKind::EVENT,
@@ -1192,7 +1192,7 @@ fn build_completions(
             }
         } else if let Some(sig) = symbols
             .iter()
-            .find(|s| s.name == call_name.as_str() && matches!(s.kind, "mod" | "chip" | "fn"))
+            .find(|s| s.name == call_name.as_str() && matches!(s.kind, "mod" | "chip" | "fn" | "callback"))
             .and_then(|s| s.ty.as_deref())
         {
             // User-defined mod/chip/fn call: complete its parameter names,
@@ -1221,7 +1221,7 @@ fn build_completions(
         }
         let kind = match sym.kind {
             "var" | "static var" | "buffer" | "array" => CompletionItemKind::VARIABLE,
-            "fn" | "mod" | "chip" => CompletionItemKind::FUNCTION,
+            "fn" | "mod" | "chip" | "callback" => CompletionItemKind::FUNCTION,
             "in" => CompletionItemKind::FIELD,
             "let" => CompletionItemKind::CONSTANT,
             "event" => CompletionItemKind::EVENT,
@@ -1229,6 +1229,12 @@ fn build_completions(
             "type" => CompletionItemKind::CLASS,
             _ => CompletionItemKind::TEXT,
         };
+        // Remove duplicate callback definitions.
+        if sym.kind == "callback" {
+            if items.iter().find(|n| n.label == sym.name.clone()).is_some() {
+                continue;
+            }
+        }
         items.push(CompletionItem {
             label: sym.name.clone(),
             kind: Some(kind),

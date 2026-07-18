@@ -85,6 +85,7 @@ fn is_importable(d: &TopDecl) -> bool {
             | TopDecl::In(_)
             | TopDecl::Out(_)
             | TopDecl::TypeAlias(_)
+            | TopDecl::Callback(_)
     )
 }
 
@@ -103,7 +104,16 @@ fn decl_name(d: &TopDecl) -> Option<&str> {
         TopDecl::In(i) => Some(&i.name),
         TopDecl::Out(o) => Some(&o.name),
         TopDecl::TypeAlias(t) => Some(&t.name),
+        TopDecl::Callback(c) => Some(&c.name),
         _ => None,
+    }
+}
+
+fn is_redefinable(d: &TopDecl) -> bool {
+    match d {
+  
+        TopDecl::Callback(_c) => true,
+        _ => false
     }
 }
 
@@ -219,7 +229,7 @@ fn resolve_import(
     let already_has = |decls: &[TopDecl], name: &str| -> bool {
         decls
             .iter()
-            .any(|existing| decl_name(existing) == Some(name))
+            .any(|existing| decl_name(existing) == Some(name) && !is_redefinable(existing))
     };
 
     match &imp.kind {
@@ -467,6 +477,7 @@ fn collect_runtime_idents_in_block(block: &Block, idents: &mut HashSet<String>) 
             Stmt::Buffer(b) => collect_idents_in_expr(&b.init, idents),
             Stmt::AnonChip(ac) => collect_runtime_idents_in_block(&ac.body, idents),
             Stmt::ChipDecl(c) => collect_runtime_idents_in_block(&c.body, idents),
+            Stmt::Callback(c) => collect_runtime_idents_in_block(&c.body, idents),
             _ => {}
         }
     }
@@ -641,6 +652,12 @@ fn collect_idents_in_block(block: &Block, idents: &mut HashSet<String>) {
             }
             Stmt::AnonChip(ac) => collect_idents_in_block(&ac.body, idents),
             Stmt::ChipDecl(c) => {
+                for p in &c.inputs {
+                    collect_idents_in_type_expr(&p.typ, idents);
+                }
+                collect_idents_in_block(&c.body, idents);
+            }
+            Stmt::Callback(c) => {
                 for p in &c.inputs {
                     collect_idents_in_type_expr(&p.typ, idents);
                 }

@@ -62,6 +62,7 @@ pub enum TopDecl {
     In(InDecl),
     Out(OutBinding),
     Handler(Handler),
+    Callback(Callback),
     Let(LetDecl),
     Await(AwaitStmt),
     Assign(Assign),
@@ -85,6 +86,7 @@ impl TopDecl {
             TopDecl::In(d) => &d.range,
             TopDecl::Out(d) => &d.range,
             TopDecl::Handler(d) => &d.range,
+            TopDecl::Callback(d) => &d.range,
             TopDecl::Let(d) => &d.range,
             TopDecl::Await(d) => &d.range,
             TopDecl::Assign(d) => &d.range,
@@ -303,6 +305,15 @@ pub struct Handler {
     pub range: SourceRange,
 }
 
+#[derive(Clone, Debug)]
+pub struct Callback {
+    pub name: String,
+    pub inputs: Vec<Param>,
+    pub outputs: Vec<NamedOutput>,
+    pub body: Block,
+    pub range: SourceRange,
+}
+
 /// A config argument on an event handler trigger. Positional args fill the
 /// event's config fields in order; named args target a field by name.
 #[derive(Clone, Debug)]
@@ -396,6 +407,7 @@ pub enum Stmt {
     Handler(Handler),
     AnonChip(AnonChipDecl),
     ChipDecl(ChipDecl),
+    Callback(Callback),
     Return {
         value: Option<Expr>,
         range: SourceRange,
@@ -419,6 +431,7 @@ impl Stmt {
             Stmt::Handler(d) => &d.range,
             Stmt::AnonChip(d) => &d.range,
             Stmt::ChipDecl(d) => &d.range,
+            Stmt::Callback(c) => &c.range,
             Stmt::Return { range, .. } => range,
         }
     }

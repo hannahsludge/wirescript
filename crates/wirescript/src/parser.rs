@@ -324,6 +324,7 @@ impl<'a> Parser<'a> {
                         | "buffer"
                         | "fn"
                         | "chip"
+                        | "callback"
                         | "mod"
                         | "on"
                         | "in"
@@ -508,6 +509,7 @@ impl<'a> Parser<'a> {
                 "array" => return Some(self.parse_array_decl()),
                 "chip" => return Some(self.parse_chip_decl(false, None, false)),
                 "mod" => return Some(self.parse_mod_decl()),
+                "callback" => return Some(self.parse_callback()),
                 "open" => {
                     if self.peek_at(1).kind == TokenKind::Kw && self.peek_at(1).text == "chip" {
                         self.advance(); // consume "open"
@@ -1210,6 +1212,22 @@ impl<'a> Parser<'a> {
             inline: true,
             label: None,
             closed: false,
+        })
+    }
+    
+    fn parse_callback(&mut self) -> TopDecl {
+        let start = self.expect(TokenKind::Kw, Some("callback")).start;
+        let name = self.expect(TokenKind::Ident, None).text;
+        let inputs = self.parse_param_list();
+        let outputs = Vec::new(); 
+        let body = self.parse_block();
+        let end = body.range.end;
+        TopDecl::Callback(Callback {
+            name,
+            inputs,
+            outputs,
+            body,
+            range: self.make_range(start, end),
         })
     }
 
@@ -1963,6 +1981,11 @@ impl<'a> Parser<'a> {
                 "mod" => {
                     if let TopDecl::Chip(c) = self.parse_mod_decl() {
                         return Some(Stmt::ChipDecl(c));
+                    }
+                }
+                "callback" => {
+                    if let TopDecl::Callback(c) = self.parse_callback() {
+                        return Some(Stmt::Callback(c));
                     }
                 }
                 _ => {}

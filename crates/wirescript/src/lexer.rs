@@ -73,7 +73,7 @@ pub enum InterpPart {
 }
 
 pub const KEYWORDS: &[&str] = &[
-    "var", "array", "buffer", "chip", "fn", "on", "in", "out", "emit", "let", "if", "else",
+    "var", "array", "buffer", "chip", "callback", "fn", "on", "in", "out", "emit", "let", "if", "else",
     "then", "match", "return", "true", "false", "ref", "open", "mod", "import", "from", "as",
     "static", "type", "await",
 ];

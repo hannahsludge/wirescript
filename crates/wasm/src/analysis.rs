@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use serde::Serialize;
 use wirescript::analysis::{
     Location, TextRange, TypeMap, collect_symbols, definition_at, find_all_references,

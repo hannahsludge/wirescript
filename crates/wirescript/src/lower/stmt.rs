@@ -14,7 +14,8 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, s: &Stmt) {
         Stmt::Let(l) => lower_let_decl(ctx, l),
         Stmt::AnonChip(ac) => lower_anon_chip(ctx, ac),
         Stmt::ChipDecl(c) => lower_chip_decl(ctx, c),
-        Stmt::In(_) => {}
+        Stmt::Callback(c) => {},
+        Stmt::In(_) => {},
         Stmt::Var(v) => {
             if ctx.lookup_var(&v.name).is_none() {
                 pre_declare_var(ctx, v);

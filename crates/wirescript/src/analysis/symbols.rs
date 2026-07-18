@@ -237,6 +237,9 @@ pub fn collect_decl(syms: &mut Vec<SymbolDef>, d: &TopDecl, tmap: &TypeMap, file
                 }
             }
         }
+        TopDecl::Callback(c) => syms.push(SymbolDef {
+            name: c.name.clone(), kind: "callback", range: c.range.clone(), ty: None, exec: true
+        }),
         TopDecl::In(i) => syms.push(SymbolDef {
             name: i.name.clone(),
             kind: "in",

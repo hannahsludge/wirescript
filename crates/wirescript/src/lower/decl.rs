@@ -20,6 +20,7 @@ pub(super) fn lower_decl(ctx: &mut LowerCtx, d: &TopDecl) {
         TopDecl::ExprStmt(es) => {
             lower_expr(ctx, &es.expr);
         }
+        TopDecl::Callback(_c) => (),
         TopDecl::Fn(f) => {
             // Deprecated: convert fn to inline mod with return value
             ctx.diagnostics.push(Diagnostic {
