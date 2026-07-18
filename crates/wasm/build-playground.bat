@@ -1,6 +1,6 @@
 
 echo "Building WASM..."
-wasm-pack build . --target web --dev
+wasm-pack build . --target web --release
 
 echo "Assembling playground..."
 rmdir /S /q site

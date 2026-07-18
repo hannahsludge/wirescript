@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")"
 
 echo "Building WASM..."
-wasm-pack build . --target web --dev
+wasm-pack build . --target web --release
 
 echo "Assembling playground..."
 rm -rf _site
