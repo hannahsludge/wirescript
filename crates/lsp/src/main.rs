@@ -1195,7 +1195,7 @@ fn build_completions(
             .find(|s| s.name == call_name.as_str() && matches!(s.kind, "mod" | "chip" | "fn" | "callback"))
             .and_then(|s| s.ty.as_deref())
         {
-            // User-defined mod/chip/fn call: complete its parameter names,
+            // User-defined mod/chip/fn/callback call: complete its parameter names,
             // parsed from the signature string in the symbol's type.
             if let Some(names) = param_names(sig) {
                 for name in names {
